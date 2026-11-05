@@ -1,0 +1,6 @@
+{
+  "name": "Raviraja Industries - Security & Gate Management CRM",
+  "description": "Enterprise Security & Gate Pass Management System for Raviraja Industries with Inward/Outward registers, Visitor tracking, Security Staff attendance, and Inventory integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
