@@ -20,6 +20,7 @@ import {
   UserProfile,
 } from '../../types/security';
 import { calculateWorkingHours } from '../../utils/securityLogic';
+import { alertDialog } from '../common/Dialogs';
 
 interface SecurityStaffModuleProps {
   staffList: SecurityStaff[];
@@ -78,7 +79,7 @@ export const SecurityStaffModule: React.FC<SecurityStaffModuleProps> = ({
     e.preventDefault();
     const staff = staffList.find((s) => s.id === attFormData.staffId);
     if (!staff) {
-      alert('Please select staff member');
+      alertDialog('Please select staff member');
       return;
     }
 
@@ -112,7 +113,7 @@ export const SecurityStaffModule: React.FC<SecurityStaffModuleProps> = ({
   const handleAddStaffSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!staffFormData.name || !staffFormData.mobileNumber) {
-      alert('Please fill Name and Mobile Number');
+      alertDialog('Please fill Name and Mobile Number');
       return;
     }
 

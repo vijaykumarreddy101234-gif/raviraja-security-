@@ -40,6 +40,7 @@ import {
   getMaterialCategories,
   saveMaterialCategory,
 } from '../../services/storage';
+import { alertDialog } from '../common/Dialogs';
 
 interface InwardEntryModuleProps {
   inwards: InwardEntry[];
@@ -239,11 +240,11 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
   // Form submission
   const handleSubmit = (isDraft: boolean = false) => {
     if (!formData.supplierCompanyName) {
-      alert('Please enter or select a Supplier Company Name');
+      alertDialog('Please enter or select a Supplier Company Name');
       return;
     }
     if (!formData.vehicleNumber) {
-      alert('Please enter Vehicle Number');
+      alertDialog('Please enter Vehicle Number');
       return;
     }
 

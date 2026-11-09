@@ -68,6 +68,7 @@ import { CrmInventory } from './components/crm/CrmInventory';
 import { CrmCustomers } from './components/crm/CrmCustomers';
 import { CrmSales } from './components/crm/CrmSales';
 import { CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
+import { DialogHost } from './components/common/Dialogs';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ChangePasswordModal } from './components/auth/ChangePasswordModal';
 import { UserManagement } from './components/auth/UserManagement';
@@ -110,6 +111,9 @@ export default function App() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  // PDF handed to the PDF editor (e.g. a voucher), and where "Back" should return to
+  const [pdfDraft, setPdfDraft] = useState<{ bytes: Uint8Array; name: string; returnTab: string } | null>(null);
 
   // Toast Notification State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -213,6 +217,12 @@ export default function App() {
       refreshAllData();
     }
   }, [activeTab, account]);
+
+  const handleEditVoucherAsPdf = (bytes: Uint8Array, name: string) => {
+    setPdfDraft({ bytes, name, returnTab: activeTab === 'pdf-editor' ? 'security-dashboard' : activeTab });
+    setVoucherModal((v) => ({ ...v, isOpen: false }));
+    setActiveTab('pdf-editor');
+  };
 
   const handleOpenVoucher = (
     title: string,
@@ -422,7 +432,12 @@ export default function App() {
   }
 
   if (!account) {
-    return <LoginScreen onLoggedIn={handleLoggedIn} sessionNotice={sessionNotice} />;
+    return (
+      <>
+        <LoginScreen onLoggedIn={handleLoggedIn} sessionNotice={sessionNotice} />
+        <DialogHost />
+      </>
+    );
   }
 
   // Pending counts for sidebar badges
@@ -580,6 +595,7 @@ export default function App() {
               gatePasses={gatePasses}
               suppliers={suppliers}
               customers={customers}
+              onEditPdf={canAccessTab(currentUser.role, 'pdf-editor') ? handleEditVoucherAsPdf : undefined}
             />
           )}
 
@@ -641,6 +657,9 @@ export default function App() {
               <PdfEditor
                 currentUser={currentUser}
                 companyName={settings.companyName}
+                initialPdf={pdfDraft}
+                onInitialPdfLoaded={() => setPdfDraft(null)}
+                onBack={(tab) => setActiveTab(tab)}
                 onAudit={(details) => {
                   recordAuditLog({
                     module: 'PDF_EDITOR',
@@ -688,10 +707,13 @@ export default function App() {
         />
       )}
 
+      <DialogHost />
+
       {/* Printable Voucher & Gate Pass Modal */}
       <PrintVoucherModal
         isOpen={voucherModal.isOpen}
         onClose={() => setVoucherModal({ ...voucherModal, isOpen: false })}
+        onEditPdf={canAccessTab(currentUser.role, 'pdf-editor') ? handleEditVoucherAsPdf : undefined}
         title={voucherModal.title}
         docNumber={voucherModal.docNumber}
         docType={voucherModal.docType}

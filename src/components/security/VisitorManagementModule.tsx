@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { VisitorEntry, VisitorType, UserProfile } from '../../types/security';
 import { formatSequenceNumber, calculateTurnaroundDuration } from '../../utils/securityLogic';
+import { alertDialog } from '../common/Dialogs';
 
 interface VisitorManagementModuleProps {
   visitors: VisitorEntry[];
@@ -95,7 +96,7 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.visitorName || !formData.mobileNumber) {
-      alert('Please fill Visitor Name and Mobile Number');
+      alertDialog('Please fill Visitor Name and Mobile Number');
       return;
     }
 

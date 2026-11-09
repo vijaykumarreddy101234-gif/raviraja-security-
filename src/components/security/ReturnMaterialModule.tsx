@@ -23,6 +23,7 @@ import {
   UserProfile,
 } from '../../types/security';
 import { formatSequenceNumber } from '../../utils/securityLogic';
+import { alertDialog } from '../common/Dialogs';
 
 interface ReturnMaterialModuleProps {
   returns: ReturnEntry[];
@@ -120,7 +121,7 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.partyName || !formData.vehicleNumber) {
-      alert('Please fill party name and vehicle number');
+      alertDialog('Please fill party name and vehicle number');
       return;
     }
 

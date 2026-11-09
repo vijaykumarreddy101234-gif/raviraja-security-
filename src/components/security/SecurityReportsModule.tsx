@@ -1,3 +1,4 @@
+import { getSecuritySettings } from '../../services/storage';
 import React, { useState } from 'react';
 import {
   FileBarChart2,
@@ -30,6 +31,7 @@ interface SecurityReportsModuleProps {
   gatePasses: GatePass[];
   suppliers: Supplier[];
   customers: Customer[];
+  onEditPdf?: (bytes: Uint8Array, fileName: string) => void;
 }
 
 type ReportType =
@@ -56,6 +58,7 @@ export const SecurityReportsModule: React.FC<SecurityReportsModuleProps> = ({
   gatePasses,
   suppliers,
   customers,
+  onEditPdf,
 }) => {
   const [selectedReport, setSelectedReport] = useState<ReportType>('DAILY_INWARD');
 
@@ -325,8 +328,16 @@ export const SecurityReportsModule: React.FC<SecurityReportsModuleProps> = ({
     document.body.removeChild(link);
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handlePdf = async () => {
+    const { buildTablePdf } = await import('../pdf/voucherPdf');
+    const settings = getSecuritySettings();
+    const bytes = await buildTablePdf({ title: reportTitle, headers: tableHeaders, rows: tableRows, settings });
+    const name = `Raviraja_${selectedReport}_${todayStr}.pdf`;
+    if (onEditPdf) return onEditPdf(bytes, name);
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
   };
 
   return (
@@ -352,11 +363,11 @@ export const SecurityReportsModule: React.FC<SecurityReportsModuleProps> = ({
             Export Excel (CSV)
           </button>
           <button
-            onClick={handlePrint}
+            onClick={handlePdf}
             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-semibold shadow-xs transition-colors"
           >
             <Printer className="w-4 h-4" />
-            Print Report
+            Report to PDF
           </button>
         </div>
       </div>

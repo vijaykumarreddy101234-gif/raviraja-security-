@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../../types/security';
 import { resetToDemoData } from '../../services/storage';
+import { confirmDialog } from '../common/Dialogs';
 
 interface NavbarProps {
   currentUser: UserProfile;
@@ -143,8 +144,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-3 pt-2 mt-1 border-t border-slate-100 flex justify-between items-center text-[11px]">
                     <span className="text-slate-500">Demo records</span>
                     <button
-                      onClick={() => {
-                        if (confirm('Reset all security and CRM demo data? User accounts are kept.')) {
+                      onClick={async () => {
+                        if (await confirmDialog('Reset all security and CRM demo data? User accounts are kept.')) {
                           resetToDemoData();
                         }
                       }}

@@ -4,10 +4,11 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   MousePointer2, Type, Highlighter, Square, Eraser, Pencil, PenTool, Image as ImageIcon, Stamp,
   Undo2, Download, FilePlus2, FileUp, RotateCcw, RotateCw, Trash2, ArrowUp, ArrowDown, ZoomIn, ZoomOut,
-  Droplets, Hash, Scissors, Crown, FileText,
+  Droplets, Hash, Scissors, Crown, FileText, ArrowLeft, Maximize2, ImagePlus, Info,
 } from 'lucide-react';
 import { PDFDocument } from 'pdf-lib';
 import { UserProfile } from '../../types/security';
+import { confirmDialog, promptDialog } from '../common/Dialogs';
 import {
   Annot, flattenAnnotations, rotatePage, deletePage, movePage, insertBlankPage, mergePdf,
   addWatermark, addPageNumbers, extractPage, setMetadata,
@@ -18,6 +19,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 type Tool = 'select' | 'text' | 'highlight' | 'rect' | 'whiteout' | 'draw';
 interface Snapshot { bytes: Uint8Array; annots: Annot[] }
 interface Props {
+  /** A PDF handed over by another screen (e.g. a voucher). Loaded once, then cleared via onInitialPdfLoaded. */
+  initialPdf?: { bytes: Uint8Array; name: string; returnTab: string } | null;
+  onInitialPdfLoaded?: () => void;
+  onBack?: (tab: string) => void;
   currentUser: UserProfile;
   companyName: string;
   onAudit: (details: string) => void;
@@ -107,7 +112,19 @@ const SignaturePad: React.FC<{ onSave: (dataUrl: string) => void; onClose: () =>
 };
 
 /* ---------- main editor ---------- */
-export default function PdfEditor({ currentUser, companyName, onAudit, notify }: Props) {
+const LOGO_KEY = 'raviraja_pdf_logo_v1';
+interface Logo { url: string; w: number; h: number }
+const loadLogo = (): Logo | null => {
+  try { return JSON.parse(localStorage.getItem(LOGO_KEY) || 'null'); } catch { return null; }
+};
+const TAB_NAMES: Record<string, string> = {
+  'inward-entry': 'Inward Entry', 'outward-entry': 'Outward Dispatch', 'visitor-management': 'Visitor Management',
+  'return-material': 'Return Material', 'gate-pass': 'Gate Pass Register', 'security-dashboard': 'Dashboard',
+  'security-reports': 'Reports',
+};
+const inFrame = (() => { try { return window.self !== window.top; } catch { return true; } })();
+
+export default function PdfEditor({ currentUser, companyName, onAudit, notify, initialPdf, onInitialPdfLoaded, onBack }: Props) {
   const [bytes, setBytes] = useState<Uint8Array | null>(null);
   const [fileName, setFileName] = useState('document.pdf');
   const [annots, setAnnots] = useState<Annot[]>([]);
@@ -124,6 +141,12 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
   const [draft, setDraft] = useState<Annot | null>(null);
   const [busy, setBusy] = useState(false);
   const [sigOpen, setSigOpen] = useState(false);
+  const [returnTab, setReturnTab] = useState<string | null>(null);
+  const [keepName, setKeepName] = useState(false);
+  const [logo, setLogo] = useState<Logo | null>(loadLogo);
+  const pendingLogoSide = useRef<'left' | 'right' | null>(null);
+  const logoRef = useRef<HTMLInputElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -139,6 +162,17 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
     if (!bytes) return;
     setHistory((h) => [...h.slice(-19), { bytes, annots }]);
   }, [bytes, annots]);
+
+  /* open a PDF handed over from a voucher / report */
+  useEffect(() => {
+    if (!initialPdf) return;
+    setBytes(initialPdf.bytes);
+    setFileName(initialPdf.name);
+    setKeepName(true);
+    setReturnTab(initialPdf.returnTab);
+    setAnnots([]); setHistory([]); setPageIdx(0); setSelectedId(null);
+    onInitialPdfLoaded?.();
+  }, [initialPdf, onInitialPdfLoaded]);
 
   /* load pdf.js document whenever bytes change */
   useEffect(() => {
@@ -192,7 +226,7 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
       notify('This PDF is encrypted or damaged and cannot be edited.', 'error');
       return;
     }
-    setBytes(b); setFileName(f.name); setAnnots([]); setHistory([]); setPageIdx(0); setSelectedId(null);
+    setBytes(b); setFileName(f.name); setKeepName(false); setAnnots([]); setHistory([]); setPageIdx(0); setSelectedId(null);
   };
   const newBlank = async () => {
     const d = await PDFDocument.create();
@@ -229,7 +263,7 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
     try {
       const flat = annots.length ? await flattenAnnotations(bytes, annots) : { bytes, droppedChars: 0 };
       const out = await setMetadata(flat.bytes, currentUser.name, `${companyName} PDF Editor`);
-      const name = fileName.replace(/\.pdf$/i, '') + '-edited.pdf';
+      const name = keepName ? fileName : fileName.replace(/\.pdf$/i, '') + '-edited.pdf';
       download(out, name);
       onAudit(`Exported "${name}" (${numPages} pages, ${annots.length} edits).`);
       notify(flat.droppedChars ? `Exported. ${flat.droppedChars} unsupported character(s) were skipped (standard fonts only).` : 'PDF exported.');
@@ -329,6 +363,17 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
       if (tag === 'TEXTAREA' || tag === 'INPUT') return;
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) { e.preventDefault(); removeSelected(); }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      if (selectedId && e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        setAnnots((l) => l.map((a) => {
+          if (a.id !== selectedId) return a;
+          if (a.type === 'draw') return { ...a, points: a.points.map((q) => ({ x: q.x + dx, y: q.y + dy })) };
+          return { ...a, x: a.x + dx, y: a.y + dy };
+        }));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -352,6 +397,51 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
     };
     r.readAsDataURL(f);
   };
+  /* ---- company logo: upload once (kept in this browser), then place left / right and move freely ---- */
+  const saveLogoFile = (f?: File) => {
+    const side = pendingLogoSide.current;
+    pendingLogoSide.current = null;
+    if (!f) return;
+    if (!/^image\/(png|jpeg|webp)$/.test(f.type)) return notify('Logo must be a PNG, JPG or WebP image.', 'error');
+    if (f.size > 5 * 1024 * 1024) return notify('Logo is larger than 5 MB.', 'error');
+    const r = new FileReader();
+    r.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, 400 / img.width);
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * scale));
+        c.height = Math.max(1, Math.round(img.height * scale));
+        c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+        const next: Logo = { url: c.toDataURL('image/png'), w: c.width, h: c.height };
+        try { localStorage.setItem(LOGO_KEY, JSON.stringify(next)); } catch { /* storage blocked: logo lasts for this visit */ }
+        setLogo(next);
+        if (side) placeLogoWith(next, side);
+        else notify('Logo saved. Use Logo Left / Logo Right to place it.');
+      };
+      img.onerror = () => notify('Could not read that image.', 'error');
+      img.src = String(r.result);
+    };
+    r.readAsDataURL(f);
+  };
+  const placeLogoWith = (l: Logo, side: 'left' | 'right') => {
+    if (!bytes) return;
+    pushHistory();
+    const w = 90, h = (l.h / l.w) * w;
+    const a: Annot = { id: uid(), type: 'image', page: pageIdx, x: side === 'left' ? 36 : Math.max(36, pageSize.w - 36 - w), y: 24, w, h, dataUrl: l.url };
+    setAnnots((list) => [...list, a]); setSelectedId(a.id); setTool('select');
+  };
+  const placeLogo = (side: 'left' | 'right') => {
+    if (logo) return placeLogoWith(logo, side);
+    pendingLogoSide.current = side;
+    logoRef.current?.click();
+  };
+  const fitWidth = () => {
+    const el = scrollRef.current;
+    if (!el || !pageSize.w) return;
+    setZoom(Math.max(0.5, Math.min(3, +((el.clientWidth - 32) / pageSize.w).toFixed(2))));
+  };
+
   const addStamp = () => {
     pushHistory();
     const text = `APPROVED\n${currentUser.name.split('(')[0].trim()}\n${new Date().toLocaleDateString('en-IN')}`;
@@ -431,7 +521,10 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
           </div>
           <p className="text-slate-400 mt-1">Annotate, sign, redact, reorder, merge and stamp invoices, gate passes and certificates. Files stay in your browser — nothing is uploaded.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {returnTab && onBack && (
+            <button onClick={() => onBack(returnTab)} className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg font-semibold"><ArrowLeft className="w-4 h-4" />Back to {TAB_NAMES[returnTab] || 'previous screen'}</button>
+          )}
           <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg font-semibold"><FileUp className="w-4 h-4" />Open PDF</button>
           <button onClick={newBlank} className="flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg font-semibold"><FilePlus2 className="w-4 h-4" />Blank page</button>
           <button disabled={!bytes || busy} onClick={exportPdf} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-lg font-bold"><Download className="w-4 h-4" />Download</button>
@@ -443,8 +536,16 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
           const other = await readFile(f);
           if (other) await pageOp((b) => mergePdf(b, other));
         }} />
+        <input ref={logoRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => { saveLogoFile(e.target.files?.[0]); e.target.value = ''; }} />
         <input ref={imgRef} type="file" accept="image/png,image/jpeg" hidden onChange={(e) => { onImageFile(e.target.files?.[0]); e.target.value = ''; }} />
       </div>
+
+      {inFrame && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2">
+          <Info className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>This app is open inside a preview frame, and many previews block file downloads. If <b>Download</b> does nothing, open the app from its own web address (or run it locally) to save PDFs.</span>
+        </div>
+      )}
 
       {!bytes ? (
         <div
@@ -480,6 +581,10 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
               <button title="Insert image (PNG/JPG)" onClick={() => imgRef.current?.click()} className={btn}><ImageIcon className="w-4 h-4" /></button>
               <button title="Approval stamp" onClick={addStamp} className={btn}><Stamp className="w-4 h-4" /></button>
               <span className="w-px h-6 bg-slate-200 mx-1" />
+              <button title="Place company logo at top-left" onClick={() => placeLogo('left')} className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700"><ImagePlus className="w-4 h-4" />Logo Left</button>
+              <button title="Place company logo at top-right" onClick={() => placeLogo('right')} className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700"><ImagePlus className="w-4 h-4" />Logo Right</button>
+              <button title={logo ? 'Replace saved logo' : 'Upload logo'} onClick={() => { pendingLogoSide.current = null; logoRef.current?.click(); }} className="px-2 py-1.5 rounded-lg hover:bg-slate-100 text-slate-500 font-medium">{logo ? 'Change logo' : 'Upload logo'}</button>
+              <span className="w-px h-6 bg-slate-200 mx-1" />
               <input type="color" value={color} onChange={(e) => setColor(e.target.value)} title="Colour" className="w-7 h-7 rounded cursor-pointer border border-slate-200" />
               <select value={fontSize} onChange={(e) => setFontSize(+e.target.value)} title="Text size" className="border border-slate-200 rounded-md px-1 py-1">
                 {[10, 12, 14, 18, 24, 32].map((s) => <option key={s} value={s}>{s}pt</option>)}
@@ -491,6 +596,7 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
               <button title="Zoom out" onClick={() => setZoom((z) => Math.max(0.5, +(z - 0.25).toFixed(2)))} className={btn}><ZoomOut className="w-4 h-4" /></button>
               <span className="w-10 text-center text-slate-500">{Math.round(zoom * 100)}%</span>
               <button title="Zoom in" onClick={() => setZoom((z) => Math.min(3, +(z + 0.25).toFixed(2)))} className={btn}><ZoomIn className="w-4 h-4" /></button>
+              <button title="Fit page to width" onClick={fitWidth} className={btn}><Maximize2 className="w-4 h-4" /></button>
             </div>
 
             {/* page tools */}
@@ -501,7 +607,7 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
               <button disabled={busy || pageIdx === 0} title="Move up" onClick={() => pageOp((b) => movePage(b, pageIdx, pageIdx - 1), (p) => p - 1)} className={btn}><ArrowUp className="w-4 h-4" /></button>
               <button disabled={busy || pageIdx >= numPages - 1} title="Move down" onClick={() => pageOp((b) => movePage(b, pageIdx, pageIdx + 1), (p) => p + 1)} className={btn}><ArrowDown className="w-4 h-4" /></button>
               <button disabled={busy} title="Insert blank page after" onClick={() => pageOp((b) => insertBlankPage(b, pageIdx), (p) => p + 1)} className={btn}><FilePlus2 className="w-4 h-4" /></button>
-              <button disabled={busy || numPages <= 1} title="Delete page" onClick={() => { if (confirm(`Delete page ${pageIdx + 1}?`)) pageOp((b) => deletePage(b, pageIdx), (p) => Math.max(0, p - 1)); }} className={`${btn} !text-rose-600`}><Trash2 className="w-4 h-4" /></button>
+              <button disabled={busy || numPages <= 1} title="Delete page" onClick={async () => { if (await confirmDialog(`Delete page ${pageIdx + 1}?`)) pageOp((b) => deletePage(b, pageIdx), (p) => Math.max(0, p - 1)); }} className={`${btn} !text-rose-600`}><Trash2 className="w-4 h-4" /></button>
               <span className="w-px h-6 bg-slate-200 mx-1" />
               <button disabled={busy} onClick={() => mergeRef.current?.click()} className="px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700">Merge PDF…</button>
               <button disabled={busy} onClick={async () => {
@@ -510,15 +616,15 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
                 download(await extractPage(src, pageIdx), fileName.replace(/\.pdf$/i, '') + `-p${pageIdx + 1}.pdf`);
                 onAudit(`Extracted page ${pageIdx + 1} of "${fileName}".`);
               }} className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700"><Scissors className="w-3.5 h-3.5" />Extract page</button>
-              <button disabled={busy} onClick={() => {
-                const t = prompt('Watermark text (applied to every page):', 'CONFIDENTIAL');
+              <button disabled={busy} onClick={async () => {
+                const t = await promptDialog('Watermark text (applied to every page):', 'CONFIDENTIAL');
                 if (t?.trim()) pageOp(async (b) => { const r = await addWatermark(b, t.trim()); if (r.dropped) notify(`${r.dropped} unsupported character(s) skipped.`, 'error'); return r.bytes; });
               }} className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700"><Droplets className="w-3.5 h-3.5" />Watermark</button>
               <button disabled={busy} onClick={() => pageOp(addPageNumbers)} className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-slate-100 font-semibold text-slate-700"><Hash className="w-3.5 h-3.5" />Page numbers</button>
             </div>
 
             {/* canvas */}
-            <div className="bg-slate-300/60 rounded-xl p-4 overflow-auto max-h-[75vh]">
+            <div ref={scrollRef} onWheel={(e) => { if (e.ctrlKey) { e.preventDefault(); setZoom((z) => Math.min(3, Math.max(0.5, +(z + (e.deltaY < 0 ? 0.1 : -0.1)).toFixed(2)))); } }} className="bg-slate-300/60 rounded-xl p-4 overflow-auto max-h-[75vh]">
               <div className="relative mx-auto shadow-lg bg-white" style={{ width: pageSize.w * zoom, height: pageSize.h * zoom }}>
                 <canvas ref={canvasRef} className="block" />
                 <div
@@ -532,7 +638,7 @@ export default function PdfEditor({ currentUser, companyName, onAudit, notify }:
                 </div>
               </div>
             </div>
-            <p className="text-slate-500">Tip: double-click text to edit · drag to move · green dot resizes · Delete removes · Ctrl+Z undoes. Page operations (rotate, move, merge…) apply your edits to the PDF first.</p>
+            <p className="text-slate-500">Tip: drag to move · arrow keys nudge (Shift = 10×) · green dot resizes · double-click text to edit · Delete removes · Ctrl+Z undoes · Ctrl+scroll zooms. Page operations (rotate, move, merge…) apply your edits to the PDF first.</p>
           </div>
         </div>
       )}

@@ -12,7 +12,7 @@ export const ALL_PERMISSIONS: { id: Permission; label: string }[] = [
   { id: 'crm.view', label: 'CRM modules' },
   { id: 'settings.manage', label: 'Security settings' },
   { id: 'audit.view', label: 'Audit trail' },
-  { id: 'pdf.edit', label: 'PDF Editor Premium' },
+  { id: 'pdf.edit', label: 'PDF Editor (voucher print / edit / logos)' },
   { id: 'users.manage', label: 'User & role management' },
 ];
 
@@ -31,6 +31,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'gatepass.manage',
     'reports.view',
     'crm.view',
+    'pdf.edit',
   ],
 };
 

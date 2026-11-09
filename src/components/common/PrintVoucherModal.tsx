@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, Printer, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, FileEdit, Download, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { QrCodeView } from './QrCodeView';
 import { getSecuritySettings } from '../../services/storage';
 import { calculateTurnaroundDuration } from '../../utils/securityLogic';
@@ -11,6 +11,8 @@ interface PrintVoucherModalProps {
   docNumber: string;
   docType: 'INWARD' | 'OUTWARD' | 'GATE_PASS' | 'VISITOR' | 'RETURN';
   data: any;
+  /** Opens the generated PDF in the PDF editor tab. Omit to hide the button. */
+  onEditPdf?: (bytes: Uint8Array, fileName: string) => void;
 }
 
 export const PrintVoucherModal: React.FC<PrintVoucherModalProps> = ({
@@ -20,51 +22,50 @@ export const PrintVoucherModal: React.FC<PrintVoucherModalProps> = ({
   docNumber,
   docType,
   data,
+  onEditPdf,
 }) => {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   if (!isOpen || !data) return null;
 
   const settings = getSecuritySettings();
 
-  const handlePrint = () => {
-    window.print();
+  const makePdf = async () => {
+    const { buildVoucherPdf } = await import('../pdf/voucherPdf');
+    return buildVoucherPdf({ docType, title, docNumber, data, settings });
+  };
+  const fileName = `${docNumber}_${docType}_Voucher.pdf`;
+
+  const handleEditPdf = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      onEditPdf?.(await makePdf(), fileName);
+    } catch (e: any) {
+      setError(e?.message || 'Could not create the PDF.');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleDownload = () => {
-    // Generates a self-contained printable HTML document as download
-    const printableElement = document.getElementById('printable-voucher-content');
-    if (!printableElement) return;
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${docNumber} - ${settings.companyName}</title>
-        <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #1e293b; }
-          .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 20px; }
-          .header h1 { margin: 0; font-size: 20px; color: #0f172a; }
-          .header p { margin: 4px 0; font-size: 12px; color: #64748b; }
-          .badge { display: inline-block; padding: 4px 8px; border: 1px solid #0f172a; font-weight: bold; font-size: 12px; margin-top: 8px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
-          th, td { border: 1px solid #cbd5e1; padding: 8px 10px; text-align: left; }
-          th { background: #f1f5f9; }
-          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; font-size: 13px; }
-          .signatures { display: flex; justify-content: space-between; margin-top: 48px; padding-top: 24px; border-top: 1px dashed #94a3b8; font-size: 12px; }
-        </style>
-      </head>
-      <body>
-        ${printableElement.innerHTML}
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob([htmlContent], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${docNumber}_Voucher.html`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const handleDownloadPdf = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const bytes = await makePdf();
+      const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch (e: any) {
+      setError(e?.message || 'Could not create the PDF.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const turnaroundDuration = data.entryDate && data.entryTime && data.exitTime
@@ -81,19 +82,23 @@ export const PrintVoucherModal: React.FC<PrintVoucherModalProps> = ({
             <h2 className="text-base font-semibold tracking-wide">Document Preview: {docNumber}</h2>
           </div>
           <div className="flex items-center gap-3">
+            {onEditPdf && (
+              <button
+                onClick={handleEditPdf}
+                disabled={busy}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-md transition-colors"
+              >
+                <FileEdit className="w-4 h-4" />
+                Edit &amp; Save as PDF
+              </button>
+            )}
             <button
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-md transition-colors"
-            >
-              <Printer className="w-4 h-4" />
-              Print Voucher
-            </button>
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-md border border-slate-700 transition-colors"
+              onClick={handleDownloadPdf}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-md border border-slate-700 transition-colors"
             >
               <Download className="w-4 h-4" />
-              Download
+              Download PDF
             </button>
             <button
               onClick={onClose}
@@ -104,6 +109,8 @@ export const PrintVoucherModal: React.FC<PrintVoucherModalProps> = ({
             </button>
           </div>
         </div>
+
+        {error && <div className="px-6 py-2 text-xs bg-rose-50 text-rose-700 border-b border-rose-200">{error}</div>}
 
         {/* Printable Voucher Content */}
         <div id="printable-voucher-content" className="p-8 text-slate-800 text-sm">

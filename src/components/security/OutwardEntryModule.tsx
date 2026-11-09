@@ -22,6 +22,7 @@ import {
   Customer,
 } from '../../types/security';
 import { formatSequenceNumber } from '../../utils/securityLogic';
+import { alertDialog } from '../common/Dialogs';
 
 interface OutwardEntryModuleProps {
   outwards: OutwardEntry[];
@@ -136,11 +137,11 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
 
   const handleSubmit = (isDraft: boolean = false) => {
     if (!formData.customerCompanyName) {
-      alert('Please select or enter customer company name');
+      alertDialog('Please select or enter customer company name');
       return;
     }
     if (!formData.vehicleNumber) {
-      alert('Please enter vehicle number');
+      alertDialog('Please enter vehicle number');
       return;
     }
 

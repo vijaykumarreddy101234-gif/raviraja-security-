@@ -96,3 +96,19 @@ test('watermark and page numbers keep page count and work on rotated pages', asy
   const n = await addPageNumbers(w.bytes);
   assert.equal(await pageCount(n), 2);
 });
+
+import { buildVoucherPdf } from './voucherPdf';
+
+test('buildVoucherPdf creates a PDF for every voucher type, even with long text and many rows', async () => {
+  const settings = { companyName: 'RAVIRAJA INDUSTRIES PRIVATE LIMITED', plantAddress: 'Plot 42, GIDC, Naroda, Ahmedabad', gstNumber: '24AAACR1234F1Z8' };
+  const mats = Array.from({ length: 40 }, (_, i) => ({ id: String(i), materialName: 'PVC Resin SG-5 very long material description '.repeat(3), materialCode: 'PVC-001', batchNumber: 'B' + i, numberOfPackages: 10, quantityReceived: 1000, unit: 'KG' }));
+  const base = { entryDate: '2026-11-09', entryTime: '09:10', vehicleNumber: 'GJ01AB1234', driverName: 'Ramesh ₹', materials: mats, invoiceQuantity: 40000, actualReceivedQuantity: 40000, shortageQuantity: 0, excessQuantity: 0 };
+  for (const t of ['INWARD', 'OUTWARD', 'GATE_PASS', 'VISITOR', 'RETURN'] as const) {
+    const bytes = await buildVoucherPdf({ docType: t, title: 'Test', docNumber: 'X-1', data: { ...base, personToMeet: 'A', department: 'B', visitorType: 'Guest', idProofType: 'PAN', idProofNumber: '1', purposeOfVisit: 'Meet' }, settings });
+    assert.ok((await pageCount(bytes)) >= 1);
+  }
+  const multi = await buildVoucherPdf({ docType: 'INWARD', title: 'T', docNumber: 'X', data: base, settings });
+  assert.ok((await pageCount(multi)) > 1, 'many rows paginate');
+  const empty = await buildVoucherPdf({ docType: 'GATE_PASS', title: 'T', docNumber: 'G-1', data: { date: '2026-11-09', time: '10:00' }, settings });
+  assert.equal(await pageCount(empty), 1);
+});

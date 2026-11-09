@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Users, UserPlus, KeyRound, Check, X } from 'lucide-react';
+import { promptDialog } from '../common/Dialogs';
 import { AppUser, UserProfile, UserRole } from '../../types/security';
 import { createUser, updateUser, adminResetPassword } from '../../services/auth';
 import { ALL_PERMISSIONS, ROLE_LABELS, ROLE_PERMISSIONS } from '../../utils/permissions';
@@ -32,7 +33,7 @@ export const UserManagement: React.FC<Props> = ({ users, currentUser, onChanged,
   };
 
   const reset = async (u: AppUser) => {
-    const pw = prompt(`Temporary password for ${u.username} (min 8, upper+lower+number):`);
+    const pw = await promptDialog(`Temporary password for ${u.username} (min 8, upper+lower+number):`, '', true);
     if (pw) report(await adminResetPassword(currentUser, u.id, pw));
   };
 

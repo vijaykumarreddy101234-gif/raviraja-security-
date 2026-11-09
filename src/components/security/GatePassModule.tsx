@@ -14,6 +14,7 @@ import {
 import { GatePass, GatePassType, UserProfile } from '../../types/security';
 import { QrCodeView } from '../common/QrCodeView';
 import { formatSequenceNumber } from '../../utils/securityLogic';
+import { alertDialog } from '../common/Dialogs';
 
 interface GatePassModuleProps {
   gatePasses: GatePass[];
@@ -55,7 +56,7 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName || !formData.vehicleNumber) {
-      alert('Please fill company and vehicle number');
+      alertDialog('Please fill company and vehicle number');
       return;
     }
 
