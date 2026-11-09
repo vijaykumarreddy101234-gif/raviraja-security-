@@ -1,5 +1,38 @@
 export type UserRole = 'ADMIN' | 'SECURITY_SUPERVISOR' | 'SECURITY_STAFF';
 
+export type Permission =
+  | 'dashboard.view'
+  | 'inward.manage'
+  | 'outward.manage'
+  | 'visitor.manage'
+  | 'staff.manage'
+  | 'return.manage'
+  | 'gatepass.manage'
+  | 'reports.view'
+  | 'settings.manage'
+  | 'audit.view'
+  | 'crm.view'
+  | 'users.manage'
+  | 'pdf.edit';
+
+/** Stored account. Passwords are never stored in plain text. */
+export interface AppUser {
+  id: string;
+  username: string;
+  name: string;
+  role: UserRole;
+  badgeNumber: string;
+  department: string;
+  passwordHash: string;
+  passwordSalt: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
+  failedAttempts: number;
+  lockedUntil?: number; // epoch ms
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -285,8 +318,8 @@ export interface GatePass {
 export interface SecurityAuditLog {
   id: string;
   timestamp: string;
-  module: 'INWARD' | 'OUTWARD' | 'VISITOR' | 'STAFF' | 'RETURN' | 'GATE_PASS' | 'SETTINGS' | 'STOCK_POSTING';
-  action: 'CREATE' | 'UPDATE' | 'VERIFY' | 'APPROVE' | 'REJECT' | 'CHECK_IN' | 'CHECK_OUT' | 'POST_STOCK' | 'DELETE';
+  module: 'INWARD' | 'OUTWARD' | 'VISITOR' | 'STAFF' | 'RETURN' | 'GATE_PASS' | 'SETTINGS' | 'STOCK_POSTING' | 'AUTH' | 'USER_MGMT' | 'PDF_EDITOR';
+  action: 'CREATE' | 'UPDATE' | 'VERIFY' | 'APPROVE' | 'REJECT' | 'CHECK_IN' | 'CHECK_OUT' | 'POST_STOCK' | 'DELETE' | 'LOGIN' | 'LOGOUT' | 'LOGIN_FAILED' | 'ACCESS_DENIED' | 'EXPORT' | 'PASSWORD_CHANGE';
   recordId: string;
   recordNumber: string;
   userName: string;

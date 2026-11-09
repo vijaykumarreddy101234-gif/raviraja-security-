@@ -2,30 +2,32 @@ import React, { useState, useEffect } from 'react';
 import {
   Shield,
   Clock,
-  UserCheck,
+  KeyRound,
+  LogOut,
   RefreshCw,
   Menu,
   Factory,
   ChevronDown,
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../../types/security';
-import { getUserProfiles, resetToDemoData } from '../../services/storage';
+import { resetToDemoData } from '../../services/storage';
 
 interface NavbarProps {
   currentUser: UserProfile;
-  onUserChange: (user: UserProfile) => void;
+  onLogout: () => void;
+  onChangePassword: () => void;
   onToggleSidebar: () => void;
   activeTab: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
-  onUserChange,
+  onLogout,
+  onChangePassword,
   onToggleSidebar,
 }) => {
   const [time, setTime] = useState<string>('');
   const [isRoleDropdownOpen, setIsRoleDropdownOpen] = useState(false);
-  const profiles = getUserProfiles();
 
   useEffect(() => {
     const updateTime = () => {
@@ -97,12 +99,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-[10px] text-slate-500">| Gate 1</span>
           </div>
 
-          {/* User Role Switcher Dropdown */}
+          {/* Signed-in user menu */}
           <div className="relative">
             <button
               onClick={() => setIsRoleDropdownOpen(!isRoleDropdownOpen)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 rounded-lg text-xs font-medium text-slate-200 transition-colors"
-              aria-label="Switch User Role"
+              className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs font-medium text-slate-200 transition-colors"
+              aria-label="Account menu"
             >
               <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-emerald-400">
                 {currentUser.name.charAt(0)}
@@ -117,62 +119,42 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             {isRoleDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-slate-200 py-2 text-slate-800 z-50">
+              <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 py-2 text-slate-800 z-50">
                 <div className="px-3 py-2 border-b border-slate-100">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    Switch Active User Role
-                  </p>
-                  <p className="text-xs text-slate-500">Test different permission workflows</p>
+                  <p className="text-xs font-semibold text-slate-900">{currentUser.name}</p>
+                  <span className={`inline-block mt-1 px-1.5 rounded text-[10px] font-bold border ${getRoleBadge(currentUser.role)}`}>
+                    {currentUser.role.replace('_', ' ')}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1.5">{currentUser.department}</span>
                 </div>
-
-                <div className="py-1">
-                  {profiles.map((p) => (
+                <button
+                  onClick={() => { setIsRoleDropdownOpen(false); onChangePassword(); }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2"
+                >
+                  <KeyRound className="w-4 h-4 text-slate-400" /> Change password
+                </button>
+                <button
+                  onClick={() => { setIsRoleDropdownOpen(false); onLogout(); }}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-slate-50 flex items-center gap-2 text-rose-600 font-semibold"
+                >
+                  <LogOut className="w-4 h-4" /> Sign out
+                </button>
+                {currentUser.role === 'ADMIN' && (
+                  <div className="px-3 pt-2 mt-1 border-t border-slate-100 flex justify-between items-center text-[11px]">
+                    <span className="text-slate-500">Demo records</span>
                     <button
-                      key={p.id}
                       onClick={() => {
-                        onUserChange(p);
-                        setIsRoleDropdownOpen(false);
+                        if (confirm('Reset all security and CRM demo data? User accounts are kept.')) {
+                          resetToDemoData();
+                        }
                       }}
-                      className={`w-full text-left px-3 py-2 hover:bg-slate-50 flex items-start gap-2.5 transition-colors ${
-                        p.id === currentUser.id ? 'bg-emerald-50' : ''
-                      }`}
+                      className="flex items-center gap-1 text-rose-600 hover:text-rose-700 font-semibold"
                     >
-                      <UserCheck
-                        className={`w-4 h-4 mt-0.5 ${
-                          p.id === currentUser.id ? 'text-emerald-600' : 'text-slate-400'
-                        }`}
-                      />
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold text-slate-900">{p.name}</p>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <span
-                            className={`px-1.5 py-0.2 rounded text-[10px] font-bold border ${getRoleBadge(
-                              p.role
-                            )}`}
-                          >
-                            {p.role.replace('_', ' ')}
-                          </span>
-                          <span className="text-[10px] text-slate-500">{p.department}</span>
-                        </div>
-                      </div>
+                      <RefreshCw className="w-3 h-3" />
+                      Reset Data
                     </button>
-                  ))}
-                </div>
-
-                <div className="px-3 pt-2 mt-1 border-t border-slate-100 flex justify-between items-center text-[11px]">
-                  <span className="text-slate-500">Need fresh test records?</span>
-                  <button
-                    onClick={() => {
-                      if (confirm('Reset all security and CRM demo data to initial state?')) {
-                        resetToDemoData();
-                      }
-                    }}
-                    className="flex items-center gap-1 text-rose-600 hover:text-rose-700 font-semibold"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Reset Data
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

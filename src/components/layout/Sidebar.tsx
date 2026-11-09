@@ -16,8 +16,11 @@ import {
   Receipt,
   ShieldCheck,
   ChevronRight,
+  FileEdit,
+  UserCog,
 } from 'lucide-react';
 import { UserRole } from '../../types/security';
+import { canAccessTab } from '../../utils/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -100,7 +103,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Security Settings',
       icon: Settings,
       badge: null,
-      restricted: userRole === 'SECURITY_STAFF',
     },
     {
       id: 'audit-logs',
@@ -179,7 +181,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
           <nav className="space-y-1">
             {securityNavItems.map((item) => {
-              if (item.restricted) return null;
+              if (!canAccessTab(userRole, item.id)) return null;
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -218,7 +220,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-[9px] text-slate-500">INTEGRATED</span>
           </div>
           <nav className="space-y-1">
-            {crmNavItems.map((item) => {
+            {crmNavItems.filter((i) => canAccessTab(userRole, i.id)).map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -245,6 +247,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
             })}
           </nav>
         </div>
+
+        {/* Premium Tools & Administration */}
+        {(canAccessTab(userRole, 'pdf-editor') || canAccessTab(userRole, 'user-management')) && (
+          <div className="px-3 pt-4 pb-4 border-t border-slate-800/80">
+            <div className="px-3 pb-2 text-[10px] font-extrabold uppercase tracking-widest text-amber-400">
+              Premium & Admin
+            </div>
+            <nav className="space-y-1">
+              {[
+                { id: 'pdf-editor', label: 'PDF Editor Premium', icon: FileEdit, tag: 'PRO' },
+                { id: 'user-management', label: 'Users & Role Access', icon: UserCog, tag: '' },
+              ]
+                .filter((i) => canAccessTab(userRole, i.id))
+                .map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => handleItemClick(item.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                        isActive ? 'bg-amber-600 text-white font-semibold' : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 truncate">
+                        <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-white' : 'text-amber-400'}`} />
+                        <span className="truncate">{item.label}</span>
+                      </div>
+                      {item.tag && (
+                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800/40">
+                          {item.tag}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+            </nav>
+          </div>
+        )}
 
         {/* Plant Status Footnote */}
         <div className="mt-auto p-4 border-t border-slate-800 bg-slate-950/40 text-[11px] text-slate-400">

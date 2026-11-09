@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
 import {
   UserProfile,
+  AppUser,
   InwardEntry,
   OutwardEntry,
   VisitorEntry,
@@ -16,8 +17,7 @@ import {
 } from './types/security';
 import {
   initializeStorageIfEmpty,
-  getActiveUser,
-  setActiveUser as persistActiveUser,
+  recordAuditLog,
   getInwards,
   saveInwardEntry,
   approveInwardEntry,
@@ -67,12 +67,33 @@ import { CrmOverview } from './components/crm/CrmOverview';
 import { CrmInventory } from './components/crm/CrmInventory';
 import { CrmCustomers } from './components/crm/CrmCustomers';
 import { CrmSales } from './components/crm/CrmSales';
-import { CheckCircle2, AlertCircle } from 'lucide-react';
+import { CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
+import { LoginScreen } from './components/auth/LoginScreen';
+import { ChangePasswordModal } from './components/auth/ChangePasswordModal';
+import { UserManagement } from './components/auth/UserManagement';
+import {
+  ensureSeedUsers,
+  restoreSession,
+  touchSession,
+  logout,
+  listUsers,
+  toProfile,
+  IDLE_TIMEOUT_MS,
+} from './services/auth';
+import { canAccessTab, hasPermission } from './utils/permissions';
+
+const PdfEditor = lazy(() => import('./components/pdf/PdfEditor'));
 
 export default function App() {
   // Initialize storage on first render
   const [isLoaded, setIsLoaded] = useState(false);
-  const [currentUser, setCurrentUser] = useState<UserProfile>(getActiveUser);
+  const [authReady, setAuthReady] = useState(false);
+  const [account, setAccount] = useState<AppUser | null>(null);
+  const [sessionNotice, setSessionNotice] = useState('');
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  // Handlers below only run after the login gate, so currentUser is always set when used.
+  const currentUser = (account ? toProfile(account) : null) as UserProfile;
   const [activeTab, setActiveTab] = useState<string>('security-dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -129,16 +150,69 @@ export default function App() {
   };
 
   useEffect(() => {
-    initializeStorageIfEmpty();
-    refreshAllData();
-    setIsLoaded(true);
+    (async () => {
+      await ensureSeedUsers();
+      initializeStorageIfEmpty();
+      refreshAllData();
+      setAppUsers(listUsers());
+      setAccount(restoreSession());
+      setAuthReady(true);
+      setIsLoaded(true);
+    })();
   }, []);
 
-  const handleUserChange = (newUser: UserProfile) => {
-    setCurrentUser(newUser);
-    persistActiveUser(newUser);
-    showToast(`Switched active profile to ${newUser.name} (${newUser.role.replace('_', ' ')})`);
+  const handleLoggedIn = (u: AppUser) => {
+    setSessionNotice('');
+    setActiveTab('security-dashboard');
+    setAccount(u);
+    refreshAllData();
+    setAppUsers(listUsers());
   };
+
+  const handleLogout = useCallback((reason = 'signed out', notice = '') => {
+    logout(account ?? undefined, reason);
+    setAccount(null);
+    setSessionNotice(notice);
+    setShowChangePw(false);
+    refreshAllData();
+  }, [account]);
+
+  // Auto sign-out after inactivity
+  useEffect(() => {
+    if (!account) return;
+    let last = Date.now();
+    const bump = () => {
+      if (Date.now() - last > 5000) touchSession();
+      last = Date.now();
+    };
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach((e) => window.addEventListener(e, bump, { passive: true }));
+    const timer = setInterval(() => {
+      if (Date.now() - last > IDLE_TIMEOUT_MS) {
+        handleLogout('was signed out (inactivity)', 'You were signed out after 30 minutes of inactivity.');
+      }
+    }, 30000);
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, bump));
+      clearInterval(timer);
+    };
+  }, [account, handleLogout]);
+
+  // Record blocked navigation attempts
+  useEffect(() => {
+    if (account && !canAccessTab(account.role, activeTab)) {
+      recordAuditLog({
+        module: 'AUTH',
+        action: 'ACCESS_DENIED',
+        recordId: account.id,
+        recordNumber: account.username,
+        userName: account.name,
+        userRole: account.role,
+        details: `Blocked access to "${activeTab}" (role ${account.role}).`,
+      });
+      refreshAllData();
+    }
+  }, [activeTab, account]);
 
   const handleOpenVoucher = (
     title: string,
@@ -327,12 +401,16 @@ export default function App() {
 
   // Settings Actions
   const handleSaveSettings = (newSettings: SecuritySettings) => {
+    if (!hasPermission(currentUser.role, 'settings.manage')) {
+      showToast('You do not have permission to change settings.', 'error');
+      return;
+    }
     saveSecuritySettings(newSettings, currentUser);
     refreshAllData();
     showToast('Security settings and policies updated.');
   };
 
-  if (!isLoaded) {
+  if (!isLoaded || !authReady) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white text-sm">
         <div className="text-center space-y-2">
@@ -341,6 +419,10 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  if (!account) {
+    return <LoginScreen onLoggedIn={handleLoggedIn} sessionNotice={sessionNotice} />;
   }
 
   // Pending counts for sidebar badges
@@ -354,7 +436,8 @@ export default function App() {
       {/* Top Navbar */}
       <Navbar
         currentUser={currentUser}
-        onUserChange={handleUserChange}
+        onLogout={() => handleLogout()}
+        onChangePassword={() => setShowChangePw(true)}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         activeTab={activeTab}
       />
@@ -391,8 +474,21 @@ export default function App() {
             </div>
           )}
 
+          {!canAccessTab(currentUser.role, activeTab) && (
+            <div className="max-w-md mx-auto mt-16 bg-white border border-rose-200 rounded-2xl p-8 text-center shadow-xs">
+              <ShieldAlert className="w-10 h-10 text-rose-500 mx-auto" />
+              <h2 className="mt-3 text-lg font-extrabold text-slate-900">Access denied</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Your role ({currentUser.role.replace('_', ' ')}) does not have permission to open this section. The attempt has been logged.
+              </p>
+              <button onClick={() => setActiveTab('security-dashboard')} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold">
+                Back to dashboard
+              </button>
+            </div>
+          )}
+
           {/* SECURITY MODULE SCREENS */}
-          {activeTab === 'security-dashboard' && (
+          {activeTab === 'security-dashboard' && canAccessTab(currentUser.role, 'security-dashboard') && (
             <SecurityDashboard
               inwards={inwards}
               outwards={outwards}
@@ -408,7 +504,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'inward-entry' && (
+          {activeTab === 'inward-entry' && canAccessTab(currentUser.role, 'inward-entry') && (
             <InwardEntryModule
               inwards={inwards}
               suppliers={suppliers}
@@ -422,7 +518,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'outward-entry' && (
+          {activeTab === 'outward-entry' && canAccessTab(currentUser.role, 'outward-entry') && (
             <OutwardEntryModule
               outwards={outwards}
               customers={customers}
@@ -433,7 +529,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'visitor-management' && (
+          {activeTab === 'visitor-management' && canAccessTab(currentUser.role, 'visitor-management') && (
             <VisitorManagementModule
               visitors={visitors}
               currentUser={currentUser}
@@ -443,7 +539,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'security-staff' && (
+          {activeTab === 'security-staff' && canAccessTab(currentUser.role, 'security-staff') && (
             <SecurityStaffModule
               staffList={staffList}
               attendanceRecords={attendance}
@@ -454,7 +550,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'return-material' && (
+          {activeTab === 'return-material' && canAccessTab(currentUser.role, 'return-material') && (
             <ReturnMaterialModule
               returns={returns}
               currentUser={currentUser}
@@ -465,7 +561,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'gate-pass' && (
+          {activeTab === 'gate-pass' && canAccessTab(currentUser.role, 'gate-pass') && (
             <GatePassModule
               gatePasses={gatePasses}
               currentUser={currentUser}
@@ -474,7 +570,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'security-reports' && (
+          {activeTab === 'security-reports' && canAccessTab(currentUser.role, 'security-reports') && (
             <SecurityReportsModule
               inwards={inwards}
               outwards={outwards}
@@ -487,7 +583,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'security-settings' && (
+          {activeTab === 'security-settings' && canAccessTab(currentUser.role, 'security-settings') && (
             <SecuritySettingsModule
               settings={settings}
               currentUser={currentUser}
@@ -495,10 +591,26 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'audit-logs' && <AuditLogsView logs={auditLogs} />}
+          {activeTab === 'audit-logs' && canAccessTab(currentUser.role, 'audit-logs') && (
+            <AuditLogsView
+              logs={auditLogs}
+              onExported={(n) => {
+                recordAuditLog({
+                  module: 'AUTH',
+                  action: 'EXPORT',
+                  recordId: currentUser.id,
+                  recordNumber: 'AUDIT-CSV',
+                  userName: currentUser.name,
+                  userRole: currentUser.role,
+                  details: `Exported ${n} audit record(s) to CSV.`,
+                });
+                refreshAllData();
+              }}
+            />
+          )}
 
           {/* CRM CORE MODULE SCREENS */}
-          {activeTab === 'crm-overview' && (
+          {activeTab === 'crm-overview' && canAccessTab(currentUser.role, 'crm-overview') && (
             <CrmOverview
               customers={customers}
               inventory={inventory}
@@ -508,23 +620,73 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'crm-inventory' && (
+          {activeTab === 'crm-inventory' && canAccessTab(currentUser.role, 'crm-inventory') && (
             <CrmInventory inventory={inventory} onNavigateToSecurity={setActiveTab} />
           )}
 
-          {activeTab === 'crm-customers' && (
+          {activeTab === 'crm-customers' && canAccessTab(currentUser.role, 'crm-customers') && (
             <CrmCustomers customers={customers} onNavigateToSecurity={setActiveTab} />
           )}
 
-          {activeTab === 'crm-sales' && (
+          {activeTab === 'crm-sales' && canAccessTab(currentUser.role, 'crm-sales') && (
             <CrmSales
               outwards={outwards}
               customers={customers}
               onNavigateToSecurity={setActiveTab}
             />
           )}
+
+          {activeTab === 'pdf-editor' && canAccessTab(currentUser.role, 'pdf-editor') && (
+            <Suspense fallback={<div className="p-10 text-center text-xs text-slate-500">Loading PDF editor…</div>}>
+              <PdfEditor
+                currentUser={currentUser}
+                companyName={settings.companyName}
+                onAudit={(details) => {
+                  recordAuditLog({
+                    module: 'PDF_EDITOR',
+                    action: 'EXPORT',
+                    recordId: 'pdf',
+                    recordNumber: 'PDF',
+                    userName: currentUser.name,
+                    userRole: currentUser.role,
+                    details,
+                  });
+                  refreshAllData();
+                }}
+                notify={showToast}
+              />
+            </Suspense>
+          )}
+
+          {activeTab === 'user-management' && canAccessTab(currentUser.role, 'user-management') && (
+            <UserManagement
+              users={appUsers}
+              currentUser={currentUser}
+              onChanged={() => {
+                setAppUsers(listUsers());
+                refreshAllData();
+              }}
+              notify={showToast}
+            />
+          )}
         </main>
       </div>
+
+      {(account.mustChangePassword || showChangePw) && (
+        <ChangePasswordModal
+          userId={account.id}
+          forced={account.mustChangePassword}
+          onCancel={() => setShowChangePw(false)}
+          onDone={() => {
+            const fresh = listUsers().find((u) => u.id === account.id);
+            if (fresh) setAccount(fresh);
+            setAppUsers(listUsers());
+            setShowChangePw(false);
+            refreshAllData();
+            showToast('Password updated.');
+          }}
+        />
+      )}
 
       {/* Printable Voucher & Gate Pass Modal */}
       <PrintVoucherModal

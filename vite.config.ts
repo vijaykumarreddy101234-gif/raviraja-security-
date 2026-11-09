@@ -8,6 +8,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(() => {
   return {
+    // Relative base so the build works on GitHub Pages project sites (/repo-name/).
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

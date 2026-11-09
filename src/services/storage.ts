@@ -94,7 +94,8 @@ export function initializeStorageIfEmpty(): void {
 }
 
 export function resetToDemoData(): void {
-  localStorage.clear();
+  // Remove only app data; keep login accounts (raviraja_auth_users_v1).
+  Object.values(STORAGE_KEYS).forEach((k) => localStorage.removeItem(k));
   initializeStorageIfEmpty();
   window.location.reload();
 }
