@@ -45,6 +45,21 @@ Every sign-in, failed sign-in, password change, access-denied attempt, user-mana
 PDF export and audit export is recorded alongside the existing inward/outward/visitor/stock events.
 The Audit Trail screen filters by module, action, user and date range and exports a spreadsheet-safe CSV.
 
+## Registers (Inward, Outward, Visitor, Return, Gate Pass)
+
+Every register has the same advanced tools:
+
+* Search + status filter, **date range** (Today / Last 7 days / This month / custom), **sort** by any key, page size and pagination.
+* **Export CSV** and **PDF** export both follow the current search / filters (CSV is spreadsheet-safe).
+  PDF opens in the PDF editor so you can add logos, stamps, etc. before saving.
+* Safer data entry: vehicle numbers are upper-cased and checked against Indian formats (warns, does not block);
+  a warning appears if the vehicle already has an open inward / outward entry; visitor mobile must be a valid
+  10-digit number and warns if the same person is already inside.
+
+**Dashboard:** KPI cards open the matching register already filtered (e.g. *Pending Inward* → Pending).
+The **Attention Needed** panel lists vehicles and visitors inside longer than a threshold you pick (visitors can be
+checked out right there) and the approval queue.
+
 ## Printing = PDF
 
 The old browser "Print" (which printed the whole page and is blocked inside embedded previews) is replaced by PDF:

@@ -41,6 +41,8 @@ import {
   saveMaterialCategory,
 } from '../../services/storage';
 import { alertDialog } from '../common/Dialogs';
+import { confirmVehicle, confirmMobile, normalizeVehicle, normalizeMobile } from '../../utils/validators';
+import { useListControls, ListExtras, Pagination, ExportMenu, useExportPdf, downloadCsv, peekListPreset } from '../common/listKit';
 
 interface InwardEntryModuleProps {
   inwards: InwardEntry[];
@@ -69,7 +71,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<'LIST' | 'FORM'>('LIST');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>(() => peekListPreset('inward')?.status ?? 'ALL');
   const [selectedEntry, setSelectedEntry] = useState<InwardEntry | null>(null);
 
   // Rejection modal state
@@ -238,7 +240,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
   const diffCalc = calculateQuantityDifference(formData.invoiceQuantity, totalItemsReceived);
 
   // Form submission
-  const handleSubmit = (isDraft: boolean = false) => {
+  const handleSubmit = async (isDraft: boolean = false) => {
     if (!formData.supplierCompanyName) {
       alertDialog('Please enter or select a Supplier Company Name');
       return;
@@ -247,9 +249,12 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
       alertDialog('Please enter Vehicle Number');
       return;
     }
+    const activeVehicles = inwards.filter((i) => !i.exitTime && i.status !== 'Rejected').map((i) => i.vehicleNumber);
+    if (!(await confirmVehicle(formData.vehicleNumber, activeVehicles, 'the plant (no gate-out recorded)'))) return;
 
     const payload = {
       ...formData,
+      vehicleNumber: normalizeVehicle(formData.vehicleNumber),
       materials,
       invoiceQuantity: Number(formData.invoiceQuantity) || totalItemsReceived,
       actualReceivedQuantity: totalItemsReceived,
@@ -268,7 +273,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
   };
 
   // Export to CSV
-  const handleExportCSV = () => {
+  const buildExport = () => {
     const headers = [
       'Inward No',
       'Entry Date',
@@ -290,7 +295,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
       'Stock Posted',
     ];
 
-    const rows = inwards.map((i) => {
+    const rows = list.all.map((i) => {
       const duration = i.exitTime
         ? calculateTurnaroundDuration(i.entryDate, i.entryTime, i.exitDate, i.exitTime)
         : 'In Plant';
@@ -301,29 +306,32 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
         i.exitDate || '-',
         i.exitTime || '-',
         duration,
-        `"${i.supplierCompanyName}"`,
+        i.supplierCompanyName,
         i.supplierMobileNumber,
         i.vehicleNumber,
-        `"${i.driverName}"`,
+        i.driverName,
         i.invoiceQuantity,
         i.actualReceivedQuantity,
         i.shortageQuantity,
         i.excessQuantity,
         i.status,
         i.vehicleExitStatus || (i.exitTime ? 'Exited' : 'Inside Factory'),
-        `"${i.verifiedBy}"`,
+        i.verifiedBy,
         i.stockPosted ? 'YES' : 'NO',
       ];
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Raviraja_Inward_Register_${defaultDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { headers, rows };
+  };
+
+  const handleExportCSV = () => {
+    const { headers, rows } = buildExport();
+    downloadCsv(`Raviraja_Inward_Register_${defaultDate}.csv`, headers, rows);
+  };
+
+  const handleExportPdf = () => {
+    const { headers, rows } = buildExport();
+    exportPdf('Inward Register', headers, rows, `Raviraja_Inward_Register_${defaultDate}.pdf`);
   };
 
   // Filtered entries
@@ -336,6 +344,21 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
 
     const matchStatus = statusFilter === 'ALL' || item.status === statusFilter;
     return matchSearch && matchStatus;
+  });
+
+  const exportPdf = useExportPdf();
+  const list = useListControls(filteredInwards, {
+    module: 'inward',
+    dateOf: (r: any) => `${r.entryDate} ${r.entryTime}`,
+    defaultSort: 'date',
+    sorters: {
+      date: { label: 'Entry date & time', value: (r) => `${r.entryDate} ${r.entryTime}` },
+      number: { label: 'Inward number', value: (r) => r.inwardEntryNumber },
+      supplier: { label: 'Supplier', value: (r) => r.supplierCompanyName },
+      vehicle: { label: 'Vehicle number', value: (r) => r.vehicleNumber },
+      qty: { label: 'Received quantity', value: (r) => Number(r.actualReceivedQuantity) || 0 },
+      status: { label: 'Status', value: (r) => r.status },
+    },
   });
 
   return (
@@ -355,13 +378,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
         <div className="flex items-center gap-2">
           {activeView === 'LIST' ? (
             <>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                Export Excel/CSV
-              </button>
+              <ExportMenu onCsv={handleExportCSV} onPdf={handleExportPdf} />
               <button
                 onClick={() => setActiveView('FORM')}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
@@ -1008,7 +1025,8 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <ListExtras list={list} onClearAll={() => { setSearchQuery(''); setStatusFilter('ALL'); }} />
+<div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-600 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-200">
                 <tr>
@@ -1025,14 +1043,14 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredInwards.length === 0 ? (
+                {list.total === 0 ? (
                   <tr>
                     <td colSpan={10} className="p-8 text-center text-slate-400 text-xs">
                       No inward consignment entries found matching criteria.
                     </td>
                   </tr>
                 ) : (
-                  filteredInwards.map((entry) => {
+                  list.pageRows.map((entry) => {
                     const isExited = entry.vehicleExitStatus === 'Exited' || !!entry.exitTime;
                     const turnaround = isExited
                       ? calculateTurnaroundDuration(entry.entryDate, entry.entryTime, entry.exitDate, entry.exitTime)
@@ -1190,6 +1208,7 @@ export const InwardEntryModule: React.FC<InwardEntryModuleProps> = ({
               </tbody>
             </table>
           </div>
+          <Pagination list={list} />
         </div>
       )}
 

@@ -69,6 +69,7 @@ import { CrmCustomers } from './components/crm/CrmCustomers';
 import { CrmSales } from './components/crm/CrmSales';
 import { CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
 import { DialogHost } from './components/common/Dialogs';
+import { PdfBridge } from './components/common/listKit';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { ChangePasswordModal } from './components/auth/ChangePasswordModal';
 import { UserManagement } from './components/auth/UserManagement';
@@ -447,6 +448,7 @@ export default function App() {
   const pendingReturnCount = returns.filter((r) => r.status === 'Pending' || r.status === 'Verified').length;
 
   return (
+    <PdfBridge.Provider value={{ openPdf: canAccessTab(currentUser.role, 'pdf-editor') ? handleEditVoucherAsPdf : undefined }}>
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans antialiased text-slate-800">
       {/* Top Navbar */}
       <Navbar
@@ -720,5 +722,6 @@ export default function App() {
         data={voucherModal.data}
       />
     </div>
+    </PdfBridge.Provider>
   );
 }

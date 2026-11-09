@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/securityLogic.test.ts src/components/pdf/pdfOps.test.ts"
+    "test": "tsx --test src/utils/securityLogic.test.ts src/utils/validators.test.ts src/components/pdf/pdfOps.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

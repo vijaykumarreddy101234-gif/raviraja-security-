@@ -24,6 +24,8 @@ import {
 } from '../../types/security';
 import { formatSequenceNumber } from '../../utils/securityLogic';
 import { alertDialog } from '../common/Dialogs';
+import { confirmVehicle, confirmMobile, normalizeVehicle, normalizeMobile } from '../../utils/validators';
+import { useListControls, ListExtras, Pagination, ExportMenu, useExportPdf, downloadCsv, peekListPreset } from '../common/listKit';
 
 interface ReturnMaterialModuleProps {
   returns: ReturnEntry[];
@@ -52,7 +54,7 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<'LIST' | 'FORM'>('LIST');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>(() => peekListPreset('return')?.status ?? 'ALL');
 
   // Approval Modal State
   const [approveModalOpen, setApproveModalOpen] = useState(false);
@@ -118,17 +120,19 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
     );
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.partyName || !formData.vehicleNumber) {
       alertDialog('Please fill party name and vehicle number');
       return;
     }
+    if (!(await confirmVehicle(formData.vehicleNumber))) return;
 
     const totalReturnQty = materials.reduce((s, m) => s + (Number(m.returnQuantity) || 0), 0);
 
     const payload = {
       ...formData,
+      vehicleNumber: normalizeVehicle(formData.vehicleNumber),
       materials,
       receivedBy: currentUser.name,
       verifiedBy: currentUser.name,
@@ -159,7 +163,7 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
     }
   };
 
-  const handleExportCSV = () => {
+  const buildExport = () => {
     const headers = [
       'Return #',
       'Date',
@@ -175,14 +179,14 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
       'Stock Posted',
     ];
 
-    const rows = returns.map((r) => [
+    const rows = list.all.map((r) => [
       r.returnEntryNumber,
       r.returnDate,
       r.returnType,
-      `"${r.partyName}"`,
+      r.partyName,
       r.originalInvoiceNumber,
       r.vehicleNumber,
-      `"${r.materials[0]?.materialName || 'Material'}"`,
+      r.materials[0]?.materialName || 'Material',
       r.materials.reduce((s, m) => s + (Number(m.returnQuantity) || 0), 0),
       r.approvedQuantity,
       r.rejectedQuantity,
@@ -190,14 +194,17 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
       r.stockPosted ? 'YES' : 'NO',
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Raviraja_Returns_${defaultDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { headers, rows };
+  };
+
+  const handleExportCSV = () => {
+    const { headers, rows } = buildExport();
+    downloadCsv(`Raviraja_Returns_${defaultDate}.csv`, headers, rows);
+  };
+
+  const handleExportPdf = () => {
+    const { headers, rows } = buildExport();
+    exportPdf('Return Material Register', headers, rows, `Raviraja_Returns_${defaultDate}.pdf`);
   };
 
   const filteredReturns = returns.filter((r) => {
@@ -209,6 +216,21 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
 
     const matchStatus = statusFilter === 'ALL' || r.stockStatus === statusFilter;
     return matchSearch && matchStatus;
+  });
+
+  const exportPdf = useExportPdf();
+  const list = useListControls(filteredReturns, {
+    module: 'return',
+    dateOf: (r: any) => `${r.returnDate} ${r.returnTime}`,
+    defaultSort: 'date',
+    sorters: {
+      date: { label: 'Return date & time', value: (r) => `${r.returnDate} ${r.returnTime}` },
+      number: { label: 'Return number', value: (r) => r.returnEntryNumber },
+      party: { label: 'Party', value: (r) => r.partyName },
+      vehicle: { label: 'Vehicle number', value: (r) => r.vehicleNumber },
+      status: { label: 'QC status', value: (r) => r.status },
+      stock: { label: 'Stock status', value: (r) => r.stockStatus },
+    },
   });
 
   return (
@@ -228,13 +250,7 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
         <div className="flex items-center gap-2">
           {activeView === 'LIST' ? (
             <>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold border border-slate-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-rose-600" />
-                Export CSV
-              </button>
+              <ExportMenu onCsv={handleExportCSV} onPdf={handleExportPdf} />
               <button
                 onClick={() => setActiveView('FORM')}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold shadow-xs transition-colors"
@@ -564,7 +580,8 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <ListExtras list={list} onClearAll={() => { setSearchQuery(''); setStatusFilter('ALL'); }} />
+<div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-600 font-semibold uppercase text-[11px] border-b border-slate-200">
                 <tr>
@@ -580,14 +597,14 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredReturns.length === 0 ? (
+                {list.total === 0 ? (
                   <tr>
                     <td colSpan={9} className="p-8 text-center text-slate-400">
                       No return material records found.
                     </td>
                   </tr>
                 ) : (
-                  filteredReturns.map((entry) => {
+                  list.pageRows.map((entry) => {
                     const totalQty = entry.materials.reduce((s, m) => s + (Number(m.returnQuantity) || 0), 0);
                     return (
                       <tr key={entry.id} className="hover:bg-slate-50/80 transition-colors">
@@ -676,6 +693,7 @@ export const ReturnMaterialModule: React.FC<ReturnMaterialModuleProps> = ({
               </tbody>
             </table>
           </div>
+          <Pagination list={list} />
         </div>
       )}
 

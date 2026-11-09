@@ -23,6 +23,8 @@ import {
 } from '../../types/security';
 import { formatSequenceNumber } from '../../utils/securityLogic';
 import { alertDialog } from '../common/Dialogs';
+import { confirmVehicle, confirmMobile, normalizeVehicle, normalizeMobile } from '../../utils/validators';
+import { useListControls, ListExtras, Pagination, ExportMenu, useExportPdf, downloadCsv, peekListPreset } from '../common/listKit';
 
 interface OutwardEntryModuleProps {
   outwards: OutwardEntry[];
@@ -45,7 +47,7 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
 }) => {
   const [activeView, setActiveView] = useState<'LIST' | 'FORM'>('LIST');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState<string>(() => peekListPreset('outward')?.status ?? 'ALL');
 
   const now = new Date();
   const defaultDate = now.toISOString().split('T')[0];
@@ -135,7 +137,7 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
     );
   };
 
-  const handleSubmit = (isDraft: boolean = false) => {
+  const handleSubmit = async (isDraft: boolean = false) => {
     if (!formData.customerCompanyName) {
       alertDialog('Please select or enter customer company name');
       return;
@@ -144,9 +146,12 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
       alertDialog('Please enter vehicle number');
       return;
     }
+    const queued = outwards.filter((o) => o.status !== 'Dispatched' && o.status !== 'Rejected').map((o) => o.vehicleNumber);
+    if (!(await confirmVehicle(formData.vehicleNumber, queued, 'the dispatch queue'))) return;
 
     const payload = {
       ...formData,
+      vehicleNumber: normalizeVehicle(formData.vehicleNumber),
       materials,
       verifiedBy: currentUser.name,
       status: isDraft ? 'Pending' : 'Ready for Dispatch',
@@ -157,7 +162,7 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
     setActiveView('LIST');
   };
 
-  const handleExportCSV = () => {
+  const buildExport = () => {
     const headers = [
       'Outward No',
       'Date',
@@ -173,29 +178,32 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
       'Verified By',
     ];
 
-    const rows = outwards.map((o) => [
+    const rows = list.all.map((o) => [
       o.outwardEntryNumber,
       o.dispatchDate,
       o.dispatchTime,
-      `"${o.customerCompanyName}"`,
+      o.customerCompanyName,
       o.gstNumber,
       o.vehicleNumber,
-      `"${o.driverName}"`,
+      o.driverName,
       o.salesInvoiceNumber,
       o.gatePassNumber,
       o.materials.reduce((s, m) => s + (Number(m.quantity) || 0), 0),
       o.status,
-      `"${o.verifiedBy}"`,
+      o.verifiedBy,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Raviraja_Outward_Register_${defaultDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { headers, rows };
+  };
+
+  const handleExportCSV = () => {
+    const { headers, rows } = buildExport();
+    downloadCsv(`Raviraja_Outward_Register_${defaultDate}.csv`, headers, rows);
+  };
+
+  const handleExportPdf = () => {
+    const { headers, rows } = buildExport();
+    exportPdf('Outward Dispatch Register', headers, rows, `Raviraja_Outward_Register_${defaultDate}.pdf`);
   };
 
   const filteredOutwards = outwards.filter((item) => {
@@ -208,6 +216,21 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
 
     const matchStatus = statusFilter === 'ALL' || item.status === statusFilter;
     return matchSearch && matchStatus;
+  });
+
+  const exportPdf = useExportPdf();
+  const list = useListControls(filteredOutwards, {
+    module: 'outward',
+    dateOf: (r: any) => `${r.dispatchDate} ${r.dispatchTime}`,
+    defaultSort: 'date',
+    sorters: {
+      date: { label: 'Dispatch date & time', value: (r) => `${r.dispatchDate} ${r.dispatchTime}` },
+      number: { label: 'Outward number', value: (r) => r.outwardEntryNumber },
+      customer: { label: 'Customer', value: (r) => r.customerCompanyName },
+      vehicle: { label: 'Vehicle number', value: (r) => r.vehicleNumber },
+      qty: { label: 'Total quantity', value: (r) => r.materials.reduce((s: number, m: any) => s + (Number(m.quantity) || 0), 0) },
+      status: { label: 'Status', value: (r) => r.status },
+    },
   });
 
   return (
@@ -227,13 +250,7 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
         <div className="flex items-center gap-2">
           {activeView === 'LIST' ? (
             <>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-blue-600" />
-                Export Excel/CSV
-              </button>
+              <ExportMenu onCsv={handleExportCSV} onPdf={handleExportPdf} />
               <button
                 onClick={() => setActiveView('FORM')}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
@@ -807,7 +824,8 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <ListExtras list={list} onClearAll={() => { setSearchQuery(''); setStatusFilter('ALL'); }} />
+<div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-600 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-200">
                 <tr>
@@ -822,14 +840,14 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredOutwards.length === 0 ? (
+                {list.total === 0 ? (
                   <tr>
                     <td colSpan={8} className="p-8 text-center text-slate-400 text-xs">
                       No outward dispatch records found.
                     </td>
                   </tr>
                 ) : (
-                  filteredOutwards.map((entry) => (
+                  list.pageRows.map((entry) => (
                     <tr key={entry.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3.5 font-mono font-bold text-slate-900">{entry.outwardEntryNumber}</td>
                       <td className="p-3.5">
@@ -907,6 +925,7 @@ export const OutwardEntryModule: React.FC<OutwardEntryModuleProps> = ({
               </tbody>
             </table>
           </div>
+          <Pagination list={list} />
         </div>
       )}
     </div>

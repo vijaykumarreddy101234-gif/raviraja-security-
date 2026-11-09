@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -14,6 +14,8 @@ import {
   Eye,
   FileText,
   PlusCircle,
+  BellRing,
+  RefreshCw,
 } from 'lucide-react';
 import {
   InwardEntry,
@@ -25,6 +27,7 @@ import {
   UserProfile,
 } from '../../types/security';
 import { computeSecurityDashboardStats } from '../../utils/securityLogic';
+import { setListPreset, ListPreset } from '../common/listKit';
 
 interface SecurityDashboardProps {
   inwards: InwardEntry[];
@@ -54,6 +57,35 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
   onApproveInward,
 }) => {
   const stats = computeSecurityDashboardStats(inwards, outwards, visitors, returns, attendance);
+
+  // Cards open the module already filtered (e.g. "Pending Inward" opens the Pending list).
+  const go = (tab: string, moduleKey?: string, preset?: ListPreset) => {
+    if (moduleKey && preset) setListPreset(moduleKey, preset);
+    onNavigate(tab);
+  };
+
+  // Re-evaluate overstay alerts every minute
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(t);
+  }, []);
+  const [vehicleHours, setVehicleHours] = useState(4);
+  const [visitorHours, setVisitorHours] = useState(8);
+  const hoursSince = (d: string, t: string) => (now - new Date(`${d}T${t}`).getTime()) / 36e5;
+  const overstayVehicles = inwards.filter(
+    (i) => !i.exitTime && i.status !== 'Rejected' && hoursSince(i.entryDate, i.entryTime) >= vehicleHours
+  );
+  const overstayVisitors = visitors.filter(
+    (v) => v.status === 'Inside Factory' && hoursSince(v.entryDate, v.entryTime) >= visitorHours
+  );
+  const fmtAge = (h: number) => (h >= 24 ? `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h` : `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`);
+  const pendingQueue = [
+    { label: 'Inward awaiting inspection', n: stats.pendingInwardApprovals, tab: 'inward-entry', key: 'inward', preset: { status: 'Pending' } },
+    { label: 'Outward awaiting gate pass', n: stats.pendingOutwardApprovals, tab: 'outward-entry', key: 'outward', preset: { status: 'Pending' } },
+    { label: 'Returns awaiting QC / approval', n: stats.pendingReturnApprovals, tab: 'return-material', key: 'return', preset: undefined },
+  ];
+  const allClear = overstayVehicles.length === 0 && overstayVisitors.length === 0 && pendingQueue.every((q) => q.n === 0);
 
   // Status badge styling
   const renderStatus = (status: string) => {
@@ -126,7 +158,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
           {/* 1. Today's Inward */}
           <div
-            onClick={() => onNavigate('inward-entry')}
+            onClick={() => go('inward-entry', 'inward', { range: 'today' })}
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-emerald-400 hover:shadow-sm cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
@@ -141,7 +173,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
           {/* 2. Today's Outward */}
           <div
-            onClick={() => onNavigate('outward-entry')}
+            onClick={() => go('outward-entry', 'outward', { range: 'today' })}
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-blue-400 hover:shadow-sm cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
@@ -156,7 +188,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
           {/* 3. Visitors Currently Inside */}
           <div
-            onClick={() => onNavigate('visitor-management')}
+            onClick={() => go('visitor-management', 'visitor', { status: 'Inside Factory' })}
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-teal-400 hover:shadow-sm cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
@@ -171,7 +203,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
           {/* 4. Total Visitors Today */}
           <div
-            onClick={() => onNavigate('visitor-management')}
+            onClick={() => go('visitor-management', 'visitor', { range: 'today' })}
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-indigo-400 hover:shadow-sm cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
@@ -201,7 +233,7 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
           {/* 6. Pending Inward Approvals */}
           <div
-            onClick={() => onNavigate('inward-entry')}
+            onClick={() => go('inward-entry', 'inward', { status: 'Pending' })}
             className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs hover:border-amber-400 hover:shadow-sm cursor-pointer transition-all"
           >
             <div className="flex items-center justify-between text-slate-500 mb-1.5">
@@ -276,6 +308,66 @@ export const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
               {stats.totalMaterialDispatchedToday.toLocaleString()} <span className="text-xs font-normal">Pcs</span>
             </div>
             <span className="text-[10px] text-blue-600 font-medium">Finished Goods Out</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Attention needed: overstay + approval queue */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-slate-200 bg-slate-50">
+          <div className="flex items-center gap-2">
+            <BellRing className={`w-4 h-4 ${allClear ? 'text-emerald-600' : 'text-amber-600'}`} />
+            <h2 className="text-sm font-bold text-slate-900">Attention Needed</h2>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${allClear ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}`}>
+              {allClear ? 'ALL CLEAR' : `${overstayVehicles.length + overstayVisitors.length + pendingQueue.reduce((a, q) => a + q.n, 0)} ITEMS`}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-[11px] text-slate-600">
+            <label className="flex items-center gap-1">Vehicle inside over
+              <select value={vehicleHours} onChange={(e) => setVehicleHours(+e.target.value)} className="px-1.5 py-0.5 border border-slate-300 rounded-md bg-white">
+                {[2, 4, 6, 8, 12].map((h) => <option key={h} value={h}>{h}h</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1">Visitor inside over
+              <select value={visitorHours} onChange={(e) => setVisitorHours(+e.target.value)} className="px-1.5 py-0.5 border border-slate-300 rounded-md bg-white">
+                {[2, 4, 8, 10, 12].map((h) => <option key={h} value={h}>{h}h</option>)}
+              </select>
+            </label>
+            <span className="flex items-center gap-1 text-slate-400"><RefreshCw className="w-3 h-3" />auto-updates</span>
+          </div>
+        </div>
+        <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100 text-xs">
+          <div className="p-4 space-y-2">
+            <p className="font-bold text-slate-700">Vehicles inside too long ({overstayVehicles.length})</p>
+            {overstayVehicles.length === 0 && <p className="text-slate-400">None over {vehicleHours}h.</p>}
+            {overstayVehicles.slice(0, 5).map((i) => (
+              <button key={i.id} onClick={() => go('inward-entry', 'inward', { status: 'ALL' })} className="w-full flex items-center justify-between text-left hover:bg-slate-50 rounded-md px-2 py-1">
+                <span><span className="font-mono font-semibold">{i.vehicleNumber}</span> <span className="text-slate-500">· {i.supplierCompanyName.slice(0, 22)}</span></span>
+                <span className="text-rose-600 font-bold">{fmtAge(hoursSince(i.entryDate, i.entryTime))}</span>
+              </button>
+            ))}
+          </div>
+          <div className="p-4 space-y-2">
+            <p className="font-bold text-slate-700">Visitors inside too long ({overstayVisitors.length})</p>
+            {overstayVisitors.length === 0 && <p className="text-slate-400">None over {visitorHours}h.</p>}
+            {overstayVisitors.slice(0, 5).map((v) => (
+              <div key={v.id} className="flex items-center justify-between px-2 py-1">
+                <span><span className="font-semibold">{v.visitorName}</span> <span className="text-slate-500">· {v.personToMeet}</span></span>
+                <span className="flex items-center gap-2">
+                  <span className="text-rose-600 font-bold">{fmtAge(hoursSince(v.entryDate, v.entryTime))}</span>
+                  <button onClick={() => onCheckOutVisitor(v.id)} className="px-2 py-0.5 bg-slate-900 text-white rounded-md font-semibold">Check out</button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="p-4 space-y-2">
+            <p className="font-bold text-slate-700">Approval queue</p>
+            {pendingQueue.map((q) => (
+              <button key={q.label} onClick={() => go(q.tab, q.key, q.preset)} className="w-full flex items-center justify-between text-left hover:bg-slate-50 rounded-md px-2 py-1">
+                <span className="text-slate-600">{q.label}</span>
+                <span className={`px-2 rounded-full font-bold ${q.n ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-400'}`}>{q.n}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>

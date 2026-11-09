@@ -1,1 +1,22 @@
 @import "tailwindcss";
+
+/* ---- Register tables: keep IDs / vehicle numbers on one line; let row actions wrap instead of overflowing ---- */
+.overflow-x-auto > table td.font-mono,
+.overflow-x-auto > table td .font-mono,
+.overflow-x-auto > table th.font-mono {
+  white-space: nowrap;
+}
+.overflow-x-auto > table > thead > tr > th,
+.overflow-x-auto > table > tbody > tr > td {
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+}
+.overflow-x-auto > table > tbody > tr > td:last-child.text-right {
+  white-space: normal;
+  min-width: 140px;
+  max-width: 200px;
+}
+.overflow-x-auto > table > tbody > tr > td:last-child.text-right > * {
+  margin-top: 2px;
+  margin-bottom: 2px;
+}

@@ -15,6 +15,8 @@ import { GatePass, GatePassType, UserProfile } from '../../types/security';
 import { QrCodeView } from '../common/QrCodeView';
 import { formatSequenceNumber } from '../../utils/securityLogic';
 import { alertDialog } from '../common/Dialogs';
+import { confirmVehicle, confirmMobile, normalizeVehicle, normalizeMobile } from '../../utils/validators';
+import { useListControls, ListExtras, Pagination, ExportMenu, useExportPdf, downloadCsv, peekListPreset } from '../common/listKit';
 
 interface GatePassModuleProps {
   gatePasses: GatePass[];
@@ -53,17 +55,19 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
     time: defaultTime,
   });
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.companyName || !formData.vehicleNumber) {
       alertDialog('Please fill company and vehicle number');
       return;
     }
+    if (!(await confirmVehicle(formData.vehicleNumber))) return;
 
     const nextPassNum = formatSequenceNumber('GP', gatePasses.length);
 
     const payload = {
       ...formData,
+      vehicleNumber: normalizeVehicle(formData.vehicleNumber),
       gatePassNumber: nextPassNum,
       securityStaffName: currentUser.name,
       qrPayload: `RAVIRAJA-GP|${nextPassNum}|${formData.vehicleNumber}|${formData.companyName}`,
@@ -74,7 +78,7 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
     setActiveView('LIST');
   };
 
-  const handleExportCSV = () => {
+  const buildExport = () => {
     const headers = [
       'Gate Pass #',
       'Date',
@@ -91,30 +95,33 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
       'Status',
     ];
 
-    const rows = gatePasses.map((gp) => [
+    const rows = list.all.map((gp) => [
       gp.gatePassNumber,
       gp.date,
       gp.time,
       gp.type,
-      `"${gp.companyName}"`,
-      `"${gp.personName}"`,
+      gp.companyName,
+      gp.personName,
       gp.vehicleNumber,
-      `"${gp.materialDetails}"`,
-      `"${gp.quantity}"`,
+      gp.materialDetails,
+      gp.quantity,
       gp.referenceInvoiceNumber,
-      `"${gp.securityStaffName}"`,
-      `"${gp.approvedBy}"`,
+      gp.securityStaffName,
+      gp.approvedBy,
       gp.status,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Raviraja_GatePass_Register_${defaultDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { headers, rows };
+  };
+
+  const handleExportCSV = () => {
+    const { headers, rows } = buildExport();
+    downloadCsv(`Raviraja_GatePass_Register_${defaultDate}.csv`, headers, rows);
+  };
+
+  const handleExportPdf = () => {
+    const { headers, rows } = buildExport();
+    exportPdf('Gate Pass Register', headers, rows, `Raviraja_GatePass_Register_${defaultDate}.pdf`);
   };
 
   const filteredGatePasses = gatePasses.filter((gp) => {
@@ -127,6 +134,20 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
 
     const matchType = typeFilter === 'ALL' || gp.type === typeFilter;
     return matchSearch && matchType;
+  });
+
+  const exportPdf = useExportPdf();
+  const list = useListControls(filteredGatePasses, {
+    module: 'gatepass',
+    dateOf: (r: any) => `${r.date} ${r.time}`,
+    defaultSort: 'date',
+    sorters: {
+      date: { label: 'Date & time', value: (r) => `${r.date} ${r.time}` },
+      number: { label: 'Gate pass number', value: (r) => r.gatePassNumber },
+      company: { label: 'Company', value: (r) => r.companyName },
+      vehicle: { label: 'Vehicle number', value: (r) => r.vehicleNumber },
+      status: { label: 'Status', value: (r) => r.status },
+    },
   });
 
   return (
@@ -146,13 +167,7 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
         <div className="flex items-center gap-2">
           {activeView === 'LIST' ? (
             <>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold border border-slate-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-indigo-600" />
-                Export CSV
-              </button>
+              <ExportMenu onCsv={handleExportCSV} onPdf={handleExportPdf} />
               <button
                 onClick={() => setActiveView('FORM')}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold shadow-xs transition-colors"
@@ -369,7 +384,8 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <ListExtras list={list} onClearAll={() => { setSearchQuery(''); setTypeFilter('ALL'); }} />
+<div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-600 font-semibold uppercase text-[11px] border-b border-slate-200">
                 <tr>
@@ -385,7 +401,7 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredGatePasses.map((gp) => (
+                {list.pageRows.map((gp) => (
                   <tr key={gp.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="p-3.5">
                       <QrCodeView value={gp.qrPayload} size={28} />
@@ -434,6 +450,7 @@ export const GatePassModule: React.FC<GatePassModuleProps> = ({
               </tbody>
             </table>
           </div>
+          <Pagination list={list} />
         </div>
       )}
     </div>

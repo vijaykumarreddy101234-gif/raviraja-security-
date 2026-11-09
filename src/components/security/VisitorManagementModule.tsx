@@ -18,6 +18,8 @@ import {
 import { VisitorEntry, VisitorType, UserProfile } from '../../types/security';
 import { formatSequenceNumber, calculateTurnaroundDuration } from '../../utils/securityLogic';
 import { alertDialog } from '../common/Dialogs';
+import { confirmVehicle, confirmMobile, normalizeVehicle, normalizeMobile } from '../../utils/validators';
+import { useListControls, ListExtras, Pagination, ExportMenu, useExportPdf, downloadCsv, peekListPreset } from '../common/listKit';
 
 interface VisitorManagementModuleProps {
   visitors: VisitorEntry[];
@@ -55,7 +57,7 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
 }) => {
   const [activeView, setActiveView] = useState<'LIST' | 'FORM'>('LIST');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'Inside Factory' | 'Checked Out'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'Inside Factory' | 'Checked Out'>(() => (peekListPreset('visitor')?.status as any) ?? 'ALL');
 
   // Duplicate Warning Modal
   const [duplicateWarning, setDuplicateWarning] = useState<VisitorEntry | null>(null);
@@ -93,15 +95,20 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
     remarks: 'Safety helmet issued. Visitor escorted.',
   });
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.visitorName || !formData.mobileNumber) {
       alertDialog('Please fill Visitor Name and Mobile Number');
       return;
     }
+    const insideMobiles = visitors.filter((v) => v.status === 'Inside Factory').map((v) => v.mobileNumber);
+    if (!(await confirmMobile(formData.mobileNumber, insideMobiles))) return;
+    if (formData.vehicleNumber && !(await confirmVehicle(formData.vehicleNumber))) return;
 
     const payload = {
       ...formData,
+      mobileNumber: normalizeMobile(formData.mobileNumber),
+      vehicleNumber: formData.vehicleNumber ? normalizeVehicle(formData.vehicleNumber) : formData.vehicleNumber,
       securityStaffName: currentUser.name,
       exitDate: formData.exitDate || undefined,
       exitTime: formData.exitTime || undefined,
@@ -147,7 +154,7 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
     }
   };
 
-  const handleExportCSV = () => {
+  const buildExport = () => {
     const headers = [
       'Visitor Pass #',
       'Visitor Name',
@@ -166,20 +173,20 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
       'Status',
     ];
 
-    const rows = visitors.map((v) => {
+    const rows = list.all.map((v) => {
       const duration = v.exitTime
         ? calculateTurnaroundDuration(v.entryDate, v.entryTime, v.exitDate, v.exitTime)
         : 'Inside Plant';
       return [
         v.visitorPassNumber,
-        `"${v.visitorName}"`,
-        `"${v.companyName}"`,
+        v.visitorName,
+        v.companyName,
         v.mobileNumber,
         v.idProofType,
         v.idProofNumber,
         v.visitorType,
-        `"${v.personToMeet}"`,
-        `"${v.department}"`,
+        v.personToMeet,
+        v.department,
         v.entryDate,
         v.entryTime,
         v.exitDate || '-',
@@ -189,14 +196,17 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
       ];
     });
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `Raviraja_Visitors_${defaultDate}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    return { headers, rows };
+  };
+
+  const handleExportCSV = () => {
+    const { headers, rows } = buildExport();
+    downloadCsv(`Raviraja_Visitors_${defaultDate}.csv`, headers, rows);
+  };
+
+  const handleExportPdf = () => {
+    const { headers, rows } = buildExport();
+    exportPdf('Visitor Register', headers, rows, `Raviraja_Visitors_${defaultDate}.pdf`);
   };
 
   const filteredVisitors = visitors.filter((v) => {
@@ -209,6 +219,21 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
 
     const matchStatus = statusFilter === 'ALL' || v.status === statusFilter;
     return matchSearch && matchStatus;
+  });
+
+  const exportPdf = useExportPdf();
+  const list = useListControls(filteredVisitors, {
+    module: 'visitor',
+    dateOf: (r: any) => `${r.entryDate} ${r.entryTime}`,
+    defaultSort: 'date',
+    sorters: {
+      date: { label: 'Entry date & time', value: (r) => `${r.entryDate} ${r.entryTime}` },
+      name: { label: 'Visitor name', value: (r) => r.visitorName },
+      company: { label: 'Company', value: (r) => r.companyName },
+      host: { label: 'Person to meet', value: (r) => r.personToMeet },
+      pass: { label: 'Pass number', value: (r) => r.visitorPassNumber },
+      status: { label: 'Status', value: (r) => r.status },
+    },
   });
 
   const currentlyInsideCount = visitors.filter((v) => v.status === 'Inside Factory').length;
@@ -233,13 +258,7 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
         <div className="flex items-center gap-2">
           {activeView === 'LIST' ? (
             <>
-              <button
-                onClick={handleExportCSV}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold border border-slate-300 transition-colors"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-teal-600" />
-                Export CSV
-              </button>
+              <ExportMenu onCsv={handleExportCSV} onPdf={handleExportPdf} />
               <button
                 onClick={() => setActiveView('FORM')}
                 className="flex items-center gap-1.5 px-3.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors"
@@ -630,7 +649,8 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
           </div>
 
           {/* Table */}
-          <div className="overflow-x-auto">
+          <ListExtras list={list} onClearAll={() => { setSearchQuery(''); setStatusFilter('ALL'); }} />
+<div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-100 text-slate-600 font-semibold uppercase tracking-wider text-[11px] border-b border-slate-200">
                 <tr>
@@ -646,14 +666,14 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredVisitors.length === 0 ? (
+                {list.total === 0 ? (
                   <tr>
                     <td colSpan={9} className="p-8 text-center text-slate-400 text-xs">
                       No visitor records found.
                     </td>
                   </tr>
                 ) : (
-                  filteredVisitors.map((v) => {
+                  list.pageRows.map((v) => {
                     const isExited = v.status === 'Checked Out' || !!v.exitTime;
                     const duration = isExited
                       ? calculateTurnaroundDuration(v.entryDate, v.entryTime, v.exitDate, v.exitTime)
@@ -753,6 +773,7 @@ export const VisitorManagementModule: React.FC<VisitorManagementModuleProps> = (
               </tbody>
             </table>
           </div>
+          <Pagination list={list} />
         </div>
       )}
 
