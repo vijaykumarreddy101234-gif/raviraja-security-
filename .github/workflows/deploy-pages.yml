@@ -1,50 +1,51 @@
-name: Deploy to GitHub Pages
+name: CI & Pages
 
 on:
   push:
     branches: ["main", "master"]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: "ci-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Install dependencies & Build
+      - name: Install, lint, test, build
         run: |
           npm ci
           npm run lint
           npm test
           npm run build
-
-      - name: Upload artifact
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
-      - name: Deploy to GitHub Pages
-        id: deployment
+  # Runs only after you enable Pages (Settings -> Pages -> Source: GitHub Actions)
+  # and add a repository variable PAGES_ENABLED = true. Vercel does not need this job.
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && vars.PAGES_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
         uses: actions/deploy-pages@v4
