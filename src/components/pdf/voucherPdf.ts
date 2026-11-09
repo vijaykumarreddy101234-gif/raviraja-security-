@@ -16,6 +16,10 @@ interface Args {
 const W = 595.28;
 const H = 841.89;
 const M = 36;
+/** thin outer page frame so printed pages always have a clean outline */
+function drawFrame(page: PDFPage, w: number, h: number) {
+  page.drawRectangle({ x: 18, y: 18, width: w - 36, height: h - 36, borderColor: rgb(0.2, 0.25, 0.33), borderWidth: 1 });
+}
 const CW = W - M * 2;
 const INK = rgb(0.06, 0.09, 0.16);
 const MUTED = rgb(0.39, 0.45, 0.55);
@@ -35,6 +39,7 @@ export async function buildVoucherPdf({ docType, title, docNumber, data, setting
   doc.setSubject(title);
 
   let page: PDFPage = doc.addPage([W, H]);
+  drawFrame(page, W, H);
   let y = H - M;
 
   const clean = (f: PDFFont, v: unknown) => toWinAnsi(f, String(v ?? '').replace(/\s+/g, ' ')).text;
@@ -81,6 +86,7 @@ export async function buildVoucherPdf({ docType, title, docNumber, data, setting
 
   const newPage = () => {
     page = doc.addPage([W, H]);
+    drawFrame(page, W, H);
     y = H - M;
     text(`${settings.companyName} - ${title}`, M, y - 8, 8, reg, MUTED);
     textRight(`DOC REF: ${docNumber}`, W - M, y - 8, 8, mono, MUTED);
@@ -364,6 +370,7 @@ export async function buildTablePdf(args: {
   };
 
   let page = doc.addPage([PW, PH]);
+  drawFrame(page, PW, PH);
   let y = PH - M;
   const drawHeader = (first: boolean) => {
     if (first) {
@@ -392,6 +399,7 @@ export async function buildTablePdf(args: {
     const rh = Math.max(...cells.map((c) => c.length)) * 9 + 6;
     if (y - rh < M) {
       page = doc.addPage([PW, PH]);
+      drawFrame(page, PW, PH);
       y = PH - M;
       drawHeader(false);
     }
